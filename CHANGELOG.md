@@ -16,6 +16,12 @@ Changelog categories for `Unreleased` and new release sections (in order, includ
 
 ## Unreleased
 
+### Fixes
+- ✅ Fixed dragging a maximized floating window on macOS repeatedly jumping back to the screen's top-left corner; floating maximize/restore is now framework-managed instead of using native stage maximize.
+
+### Documentation
+- ✅ Added ADR [docs/adr/0009-framework-managed-floating-window-maximize.md](docs/adr/0009-framework-managed-floating-window-maximize.md) for framework-managed floating maximize state.
+
 ## v0.8.0 - 2026-04-29
 
 ### Features

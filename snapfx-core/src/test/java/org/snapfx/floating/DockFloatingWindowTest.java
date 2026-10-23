@@ -14,6 +14,7 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.TextArea;
+import javafx.geometry.Rectangle2D;
 import javafx.geometry.Side;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
@@ -25,6 +26,7 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
 import org.junit.jupiter.api.BeforeAll;
@@ -65,7 +67,7 @@ class DockFloatingWindowTest {
             stage.setY(80);
             stage.setWidth(1000);
             stage.setHeight(700);
-            stage.setMaximized(true);
+            writeWindowMaximized(floatingWindow, true);
 
             Label titleTarget = new Label("Title");
             MouseEvent doubleClick = createMouseEvent(
@@ -100,7 +102,7 @@ class DockFloatingWindowTest {
             stage.setY(0);
             stage.setWidth(1400);
             stage.setHeight(900);
-            stage.setMaximized(true);
+            writeWindowMaximized(floatingWindow, true);
 
             HBox titleBar = new HBox();
             MouseEvent dragEvent = createMouseEvent(
@@ -117,7 +119,7 @@ class DockFloatingWindowTest {
 
             invokeRestoreWindowForDrag(floatingWindow, stage, dragEvent, titleBar);
 
-            assertFalse(stage.isMaximized());
+            assertFalse(readWindowMaximized(floatingWindow));
             assertEquals(150.0, stage.getX(), 0.0001);
             assertEquals(120.0, stage.getY(), 0.0001);
             assertEquals(640.0, stage.getWidth(), 0.0001);
@@ -666,7 +668,7 @@ class DockFloatingWindowTest {
             stage.setY(80);
             stage.setWidth(1000);
             stage.setHeight(700);
-            stage.setMaximized(true);
+            writeWindowMaximized(floatingWindow, true);
 
             HBox titleBar = new HBox();
             Label contentTarget = new Label("Content");
@@ -697,9 +699,93 @@ class DockFloatingWindowTest {
             );
             invokeOnSceneMouseDragged(floatingWindow, tinyDragEvent, stage, titleBar);
 
-            assertTrue(stage.isMaximized());
+            assertTrue(readWindowMaximized(floatingWindow));
             assertEquals(100.0, stage.getX(), 0.0001);
             assertEquals(80.0, stage.getY(), 0.0001);
+        });
+    }
+
+    @Test
+    void testToggleMaximizeUsesManagedScreenBoundsInsteadOfNativeMaximize() {
+        runOnFxThreadAndWait(() -> {
+            DockFloatingWindow floatingWindow = new DockFloatingWindow(new DockNode(new Label("Node"), "Node"));
+            Stage stage = new Stage();
+            stage.setX(100);
+            stage.setY(80);
+            stage.setWidth(600);
+            stage.setHeight(400);
+            Rectangle2D expectedBounds = Screen.getScreensForRectangle(100, 80, 600, 400).getFirst().getVisualBounds();
+
+            invokeToggleMaximize(floatingWindow, stage);
+
+            // Native maximize on macOS UNDECORATED stages uses NSWindow zoom, which animates to a stale frame.
+            assertFalse(stage.isMaximized());
+            assertEquals(expectedBounds.getMinX(), stage.getX(), 0.0001);
+            assertEquals(expectedBounds.getMinY(), stage.getY(), 0.0001);
+            assertEquals(expectedBounds.getWidth(), stage.getWidth(), 0.0001);
+            assertEquals(expectedBounds.getHeight(), stage.getHeight(), 0.0001);
+
+            invokeToggleMaximize(floatingWindow, stage);
+
+            assertFalse(stage.isMaximized());
+            assertEquals(100.0, stage.getX(), 0.0001);
+            assertEquals(80.0, stage.getY(), 0.0001);
+            assertEquals(600.0, stage.getWidth(), 0.0001);
+            assertEquals(400.0, stage.getHeight(), 0.0001);
+        });
+    }
+
+    @Test
+    void testDragFromMaximizedRestoresOnceAndFollowsPointer() {
+        runOnFxThreadAndWait(() -> {
+            DockFloatingWindow floatingWindow = new DockFloatingWindow(new DockNode(new Label("Node"), "Node"));
+            floatingWindow.setSnappingEnabled(false);
+            Stage stage = new Stage();
+            stage.setX(100);
+            stage.setY(80);
+            stage.setWidth(600);
+            stage.setHeight(400);
+            invokeToggleMaximize(floatingWindow, stage);
+            double maximizedWidth = stage.getWidth();
+            double pressScreenX = stage.getX() + maximizedWidth / 2.0;
+            double pressScreenY = stage.getY() + 15;
+
+            HBox titleBar = new HBox();
+            MouseEvent pressEvent = createMouseEvent(
+                MouseEvent.MOUSE_PRESSED,
+                pressScreenX,
+                pressScreenY,
+                maximizedWidth / 2.0,
+                15,
+                titleBar,
+                titleBar,
+                MouseButton.PRIMARY,
+                1
+            );
+            invokeOnTitleBarMousePressed(floatingWindow, pressEvent, stage, titleBar);
+
+            for (int step = 1; step <= 3; step++) {
+                double pointerX = pressScreenX + step * 40.0;
+                double pointerY = pressScreenY + step * 30.0;
+                MouseEvent dragEvent = createMouseEvent(
+                    MouseEvent.MOUSE_DRAGGED,
+                    pointerX,
+                    pointerY,
+                    maximizedWidth / 2.0,
+                    15,
+                    titleBar,
+                    titleBar,
+                    MouseButton.PRIMARY,
+                    1
+                );
+                invokeOnSceneMouseDragged(floatingWindow, dragEvent, stage, titleBar);
+
+                assertFalse(readWindowMaximized(floatingWindow));
+                assertEquals(600.0, stage.getWidth(), 0.0001);
+                assertEquals(400.0, stage.getHeight(), 0.0001);
+                assertEquals(pointerX - 300.0, stage.getX(), 0.0001);
+                assertEquals(pointerY - 15.0, stage.getY(), 0.0001);
+            }
         });
     }
 
@@ -1510,6 +1596,36 @@ class DockFloatingWindowTest {
             method.invoke(floatingWindow);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Unable to invoke rebuildLayout", e);
+        }
+    }
+
+    private void invokeToggleMaximize(DockFloatingWindow floatingWindow, Stage stage) {
+        try {
+            Method method = DockFloatingWindow.class.getDeclaredMethod("toggleMaximize", Stage.class);
+            method.setAccessible(true);
+            method.invoke(floatingWindow, stage);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to invoke toggleMaximize", e);
+        }
+    }
+
+    private boolean readWindowMaximized(DockFloatingWindow floatingWindow) {
+        try {
+            Field field = DockFloatingWindow.class.getDeclaredField("windowMaximized");
+            field.setAccessible(true);
+            return field.getBoolean(floatingWindow);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to read windowMaximized", e);
+        }
+    }
+
+    private void writeWindowMaximized(DockFloatingWindow floatingWindow, boolean maximized) {
+        try {
+            Field field = DockFloatingWindow.class.getDeclaredField("windowMaximized");
+            field.setAccessible(true);
+            field.setBoolean(floatingWindow, maximized);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to write windowMaximized", e);
         }
     }
 

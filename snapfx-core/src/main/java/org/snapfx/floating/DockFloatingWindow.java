@@ -160,6 +160,7 @@ public final class DockFloatingWindow {
     private double restoreWidth = DEFAULT_WIDTH;
     private double restoreHeight = DEFAULT_HEIGHT;
     private boolean hasRestoreBounds;
+    private boolean windowMaximized;
 
     private boolean resizing;
     private int activeResizeMask;
@@ -420,7 +421,7 @@ public final class DockFloatingWindow {
     public void setPreferredPosition(Double screenX, Double screenY) {
         preferredX = screenX;
         preferredY = screenY;
-        if (stage != null && !stage.isMaximized()) {
+        if (stage != null && !windowMaximized) {
             if (screenX != null) {
                 stage.setX(screenX);
             }
@@ -443,7 +444,7 @@ public final class DockFloatingWindow {
         if (height > 0) {
             preferredHeight = height;
         }
-        if (stage != null && !stage.isMaximized()) {
+        if (stage != null && !windowMaximized) {
             stage.setWidth(preferredWidth);
             stage.setHeight(preferredHeight);
         }
@@ -492,7 +493,7 @@ public final class DockFloatingWindow {
         if (stage == null || !stage.isShowing()) {
             return;
         }
-        if (stage.isMaximized() && hasRestoreBounds) {
+        if (windowMaximized && hasRestoreBounds) {
             preferredX = restoreX;
             preferredY = restoreY;
             preferredWidth = restoreWidth;
@@ -1015,8 +1016,7 @@ public final class DockFloatingWindow {
                 notifyWindowActivated();
             }
         });
-        window.maximizedProperty().addListener((obs, oldValue, newValue) -> updateMaximizeButtonState(window));
-        updateMaximizeButtonState(window);
+        updateMaximizeButtonState();
         window.setOnCloseRequest(event -> {
             if (!canProcessCloseRequest()) {
                 event.consume();
@@ -1271,7 +1271,7 @@ public final class DockFloatingWindow {
             return;
         }
         titleBarDragActive = true;
-        if (window.isMaximized()) {
+        if (windowMaximized) {
             ensureRestoreBounds(window);
             double width = window.getWidth();
             double pointerRatio = width > 0 ? event.getX() / width : 0.5;
@@ -1297,7 +1297,7 @@ public final class DockFloatingWindow {
             awaitingMaximizedRestoreDrag = false;
             return;
         }
-        if (window.isMaximized()) {
+        if (windowMaximized) {
             if (awaitingMaximizedRestoreDrag && !hasExceededMaximizedRestoreThreshold(event)) {
                 return;
             }
@@ -1551,14 +1551,39 @@ public final class DockFloatingWindow {
     }
 
     private void toggleMaximize(Stage window) {
-        if (window.isMaximized()) {
-            window.setMaximized(false);
-            restoreWindowBounds(window);
+        if (windowMaximized) {
+            restoreFromMaximized(window);
         } else {
-            rememberRestoreBounds(window);
-            window.setMaximized(true);
+            maximizeToScreen(window);
         }
-        updateMaximizeButtonState(window);
+    }
+
+    private void maximizeToScreen(Stage window) {
+        rememberRestoreBounds(window);
+        Rectangle2D screenBounds = resolveMaximizeBounds(window);
+        window.setX(screenBounds.getMinX());
+        window.setY(screenBounds.getMinY());
+        window.setWidth(screenBounds.getWidth());
+        window.setHeight(screenBounds.getHeight());
+        windowMaximized = true;
+        updateMaximizeButtonState();
+    }
+
+    private void restoreFromMaximized(Stage window) {
+        windowMaximized = false;
+        restoreWindowBounds(window);
+        updateMaximizeButtonState();
+    }
+
+    private Rectangle2D resolveMaximizeBounds(Stage window) {
+        List<Screen> screens = Screen.getScreensForRectangle(
+            window.getX(),
+            window.getY(),
+            Math.max(1.0, window.getWidth()),
+            Math.max(1.0, window.getHeight())
+        );
+        Screen screen = screens.isEmpty() ? Screen.getPrimary() : screens.getFirst();
+        return screen.getVisualBounds();
     }
 
     private void ensureRestoreBounds(Stage window) {
@@ -1576,8 +1601,7 @@ public final class DockFloatingWindow {
 
     private void restoreWindowForDrag(Stage window, MouseEvent event, HBox titleBar) {
         ensureRestoreBounds(window);
-        window.setMaximized(false);
-        restoreWindowBounds(window);
+        restoreFromMaximized(window);
         double titleBarHeight = titleBar.getHeight() > 0 ? titleBar.getHeight() : 32.0;
         dragOffsetY = Math.clamp(event.getY(), 0.0, titleBarHeight);
     }
@@ -1600,11 +1624,11 @@ public final class DockFloatingWindow {
         window.setHeight(restoreHeight);
     }
 
-    private void updateMaximizeButtonState(Stage window) {
+    private void updateMaximizeButtonState() {
         if (maximizeButton == null) {
             return;
         }
-        if (window.isMaximized()) {
+        if (windowMaximized) {
             maximizeButton.setGraphic(createControlIcon(DockThemeStyleClasses.DOCK_CONTROL_ICON_RESTORE));
             if (maximizeTooltip != null) {
                 maximizeTooltip.setText(text("dock.floating.tooltip.restoreWindow"));
@@ -1637,7 +1661,7 @@ public final class DockFloatingWindow {
             }
         }
         if (stage != null) {
-            updateMaximizeButtonState(stage);
+            updateMaximizeButtonState();
         }
         updatePinButtonState();
     }
@@ -1648,7 +1672,7 @@ public final class DockFloatingWindow {
         root.addEventFilter(MouseEvent.MOUSE_EXITED_TARGET, event -> applyCursor(root, window.getScene(), Cursor.DEFAULT, event.getTarget()));
 
         root.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
-            if (window.isMaximized()
+            if (windowMaximized
                 || event.getButton() != MouseButton.PRIMARY
                 || event.getTarget() instanceof Button) {
                 return;
@@ -1661,7 +1685,7 @@ public final class DockFloatingWindow {
         });
 
         root.addEventFilter(MouseEvent.MOUSE_DRAGGED, event -> {
-            if (!resizing || window.isMaximized()) {
+            if (!resizing || windowMaximized) {
                 return;
             }
             performResize(event, window);
@@ -1682,7 +1706,7 @@ public final class DockFloatingWindow {
         if (window == null || event == null) {
             return;
         }
-        if (window.isMaximized() || resizing) {
+        if (windowMaximized || resizing) {
             applyCursor(root, window.getScene(), Cursor.DEFAULT, event.getTarget());
             return;
         }
@@ -2488,7 +2512,7 @@ public final class DockFloatingWindow {
         clearDropPreview();
         clearTargetCursorOverride();
         clearTabSelectionListeners();
-        if (hiddenStage.isMaximized() && hasRestoreBounds) {
+        if (windowMaximized && hasRestoreBounds) {
             preferredX = restoreX;
             preferredY = restoreY;
             preferredWidth = restoreWidth;
@@ -2515,6 +2539,7 @@ public final class DockFloatingWindow {
         maximizeTooltip = null;
 
         stage = null;
+        windowMaximized = false;
         resizing = false;
         activeResizeMask = 0;
         suppressCloseRequestHandling = false;

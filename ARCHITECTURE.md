@@ -617,6 +617,14 @@ Floating-window snapping is handled in `DockFloatingWindow` with candidate-scori
 - During resize, only the actively dragged edge(s) are snapped; the opposite edge remains fixed.
 - After resize snapping, minimum width/height constraints are re-applied while preserving that fixed-opposite-edge behavior.
 
+### Floating Maximize/Restore
+
+Floating-window maximize state is managed by `DockFloatingWindow` instead of native `Stage.setMaximized(...)` (see ADR 0009).
+
+- Maximize remembers the current bounds and applies the visual bounds of the window's current screen.
+- Restore (title-bar button, double-click, drag-from-maximized) re-applies the remembered bounds.
+- Native maximize is avoided because macOS zoom on undecorated stages reports unreliable state and animates restores toward the screen's top-left corner, which broke drag-from-maximized.
+
 ### Sidebar Overlay and Pinned Panel Rendering
 
 Phase-C side bars split state across model and view layers on purpose:
